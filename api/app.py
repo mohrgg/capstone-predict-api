@@ -14,7 +14,10 @@ model = TFBertForSequenceClassification.from_pretrained('./model')
 tokenizer = BertTokenizer.from_pretrained('./model')
 
 # Define emotion labels and messages
-emotions = ["anxiety", "depression", "lonely", "normal", "happy"]
+emotions = ["anxiety", "depression", "happy", "lonely", "neutral"]
+positive_emotions = ["happy", "neutral"]
+negative_emotions = ["anxiety", "depression", "lonely"]
+
 messages = {
     "anxiety": [
         "Kamu memiliki kekuatan untuk mengatasi semua rintangan.",
@@ -31,7 +34,7 @@ messages = {
         "Cobalah untuk terlibat dalam kegiatan sosial atau komunitas.",
         "Ingatlah bahwa perasaan kesepian ini sementara dan bisa berubah."
     ],
-    "normal": [
+    "neutral": [
         "Lanjutkan hari dengan semangat positif.",
         "Kamu melakukan yang terbaik, teruskan!",
         "Nikmati momen-momen kecil dalam hidupmu."
@@ -45,9 +48,6 @@ messages = {
 
 # Load activities from CSV
 activities = pd.read_csv(os.path.join(os.path.dirname(__file__), 'activity.csv'))
-# print(activities.head())  # Tambahkan ini untuk cek kolom
-
-confidence_threshold = 25.0  # Define a threshold for confidence
 
 def analyze_text(text):
     inputs = tokenizer(text, return_tensors='tf', truncation=True, padding=True, max_length=512)
@@ -55,16 +55,35 @@ def analyze_text(text):
     probabilities = tf.nn.softmax(outputs.logits, axis=-1)
     scores = probabilities.numpy()[0]
     print("Scores:", scores)  # Debugging line to check scores
-    max_index = np.argmax(scores)
-    dominant_emotion = emotions[max_index]
-    confidence = scores[max_index] * 100
+
+    # Calculate the weighted average score for each class
+    positive_score = np.sum([scores[emotions.index(emotion)] for emotion in positive_emotions]) / len(positive_emotions)
+    negative_score = np.sum([scores[emotions.index(emotion)] for emotion in negative_emotions]) / len(negative_emotions)
+    print("Positive Score:", positive_score)  # Debugging line to check positive score
+    print("Negative Score:", negative_score)  # Debugging line to check negative score
+
+    if positive_score >= negative_score:
+        dominant_class = "positive"
+    else:
+        dominant_class = "negative"
+
+    print("Dominant Class:", dominant_class)  # Debugging line to check dominant class
+
+    if dominant_class == "positive":
+        relevant_emotions = positive_emotions
+    else:
+        relevant_emotions = negative_emotions
+
+    max_index = np.argmax([scores[emotions.index(emotion)] for emotion in relevant_emotions])
+    dominant_emotion = relevant_emotions[max_index]
+
     print("Dominant Emotion:", dominant_emotion)  # Debugging line to check dominant emotion
-    print("Confidence:", confidence)  # Debugging line to check confidence
-    return dominant_emotion, confidence
+
+    return dominant_emotion
 
 def get_random_saran():
     random_activity = activities.sample(n=1)
-    description = random_activity.iloc[0]['description']  # Pastikan kolom ini sesuai dengan kolom di CSV
+    description = random_activity.iloc[0]['description']
     return description
 
 @app.route('/predict-emotion', methods=['POST'])
@@ -74,24 +93,17 @@ def predict_emotion():
     if not text:
         return jsonify({"error": "No text provided"}), 400
     
-    emotion, confidence = analyze_text(text)
+    emotion = analyze_text(text)
     message = random.choice(messages[emotion])
     saran = get_random_saran()
     
-    if confidence < confidence_threshold:
-        result = {
-            "Mental State": "Uncertain",
-            "Message": "The model is not confident about the emotion.",
-            "Saran": "The model is not confident about the emotion."
-        }
-    else:
-        result = {
-            "Mental State": emotion.capitalize(),
-            "Message": message,
-            "Saran": saran
-        }
+    result = {
+        "Mental State": emotion.capitalize(),
+        "Message": message,
+        "Saran": saran
+    }
     
     return jsonify(result)
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=8080)
+    app.run(host='0.0.0.0', port=5000)
