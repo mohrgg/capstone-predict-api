@@ -6,6 +6,7 @@ import tensorflow as tf
 import pandas as pd
 import random
 import os
+import uuid
 
 app = Flask(__name__)
 
@@ -49,6 +50,9 @@ messages = {
 # Load activities from CSV
 activities = pd.read_csv(os.path.join(os.path.dirname(__file__), 'activity.csv'))
 
+# In-memory storage for tweets
+tweets = []
+
 def analyze_text(text):
     inputs = tokenizer(text, return_tensors='tf', truncation=True, padding=True, max_length=512)
     outputs = model(inputs)
@@ -88,7 +92,7 @@ def get_random_saran():
 
 @app.route('/predict-emotion', methods=['POST'])
 def predict_emotion():
-    data = request.json
+    data = request.form
     text = data.get('text')
     if not text:
         return jsonify({"error": "No text provided"}), 400
@@ -104,6 +108,49 @@ def predict_emotion():
     }
     
     return jsonify(result)
+
+@app.route('/save-tweet', methods=['POST'])
+def save_tweet():
+    data = request.form
+    user_id = data.get('user_id')
+    text = data.get('text')
+    if not user_id or not text:
+        return jsonify({"error": "User ID and text are required"}), 400
+    
+    detail_id = str(uuid.uuid4())
+    emotion = analyze_text(text)
+    tweet = {
+        "user_id": user_id,
+        "detail_id": detail_id,
+        "text": text,
+        "mental_state": emotion.capitalize()
+    }
+    tweets.append(tweet)
+    
+    return jsonify({"message": "Tweet saved successfully", "detail_id": detail_id})
+
+@app.route('/get-tweets', methods=['GET'])
+def get_tweets():
+    user_id = request.args.get('user_id')
+    if not user_id:
+        return jsonify({"error": "User ID is required"}), 400
+    
+    user_tweets = [tweet for tweet in tweets if tweet['user_id'] == user_id]
+    
+    return jsonify(user_tweets)
+
+@app.route('/get-tweet-detail', methods=['GET'])
+def get_tweet_detail():
+    detail_id = request.args.get('detail_id')
+    if not detail_id:
+        return jsonify({"error": "Detail ID is required"}), 400
+    
+    tweet = next((tweet for tweet in tweets if tweet['detail_id'] == detail_id), None)
+    
+    if not tweet:
+        return jsonify({"error": "Tweet not found"}), 404
+    
+    return jsonify(tweet)
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=8080)
